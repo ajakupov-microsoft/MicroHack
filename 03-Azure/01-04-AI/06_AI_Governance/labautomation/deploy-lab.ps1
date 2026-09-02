@@ -127,6 +127,33 @@ Write-Host "[INFO]  Engine: $templateKind, resource-group-scoped."
 
 $deployOutputs = $null
 $effectiveLocation = $null
+$firstFailure = $null
+
+# Region fallback only makes sense for an EMPTY resource group. Once the RG holds
+# resources, their names are already pinned to the region of the first attempt, so every
+# later candidate fails with 'InvalidResourceLocation: <name> already exists in location
+# <first region>' — which masks the real error and cannot ever succeed. Re-running into a
+# non-empty RG (a re-deployed event, or a retry after a partial failure) must therefore
+# stay in the region that RG already uses.
+$existingRegions = @(
+    Get-AzResource -ResourceGroupName $effectiveRG -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Location -ErrorAction SilentlyContinue |
+        Where-Object { $_ -and $_ -ne 'global' } |
+        Group-Object |
+        Sort-Object Count -Descending |
+        Select-Object -ExpandProperty Name
+)
+if ($existingRegions.Count -gt 0) {
+    # Prefer a region the platform actually asked for; otherwise the most common region
+    # already used in the RG. 'global' resources are ignored — they are not deployable regions.
+    $pinnedRegion = $candidateRegions | Where-Object { $existingRegions -contains $_ } | Select-Object -First 1
+    if (-not $pinnedRegion) { $pinnedRegion = $existingRegions[0] }
+    if ($candidateRegions.Count -gt 1) {
+        Write-Host "[INFO]  RG '$effectiveRG' already contains resources in '$($existingRegions -join ", ")'."
+        Write-Host "[INFO]  Pinning deployment to '$pinnedRegion' (region fallback applies to empty RGs only)."
+    }
+    $candidateRegions = @($pinnedRegion)
+}
 
 foreach ($region in $candidateRegions) {
     Write-Host "[INFO]  Deploying → RG '$effectiveRG' in '$region' (token '$resourceToken')..."
@@ -153,12 +180,15 @@ foreach ($region in $candidateRegions) {
         if (-not $retryable) {
             throw "Deployment failed in '$region' with a non-retryable error (retrying other regions would fail the same way): $_"
         }
+        # Keep the FIRST failure: it is the real one. Later regions typically fail with a
+        # downstream symptom, so reporting only the last error hides the actual cause.
+        if (-not $firstFailure) { $firstFailure = "in '$region': $_" }
         Write-Host "[WARN]  Deployment failed in '$region': $_ — trying next region."
     }
 }
 
 if (-not $deployOutputs) {
-    throw "Deployment failed in all candidate regions: $($candidateRegions -join ', ')"
+    throw "Deployment failed in all candidate regions ($($candidateRegions -join ', ')). First (root cause) error $firstFailure"
 }
 
 Write-Host "[OK]    Provisioning complete in '$effectiveLocation' (resource group '$effectiveRG')."
