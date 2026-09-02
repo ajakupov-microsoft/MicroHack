@@ -163,12 +163,23 @@ The script follows MicroHack conventions:
 - **Region fallback** — Retries across `$PreferredLocation` (honoring platform preference),
   falling back to [swedencentral, westeurope, norwayeast] if all fail. Retries are gated on
   `Test-MhhDeploymentFailureRetryable`: a non-retryable failure (template or permission bug)
-  aborts immediately with the real error rather than being retried in every region.
+  aborts immediately with the real error rather than being retried in every region. Fallback
+  applies to **empty resource groups only** — once an RG holds resources their names are
+  pinned to that region, so any other candidate would fail with `InvalidResourceLocation` and
+  bury the real error. If all regions fail, the **first** (root cause) error is reported.
 - **Deterministic naming** — `Get-MhhStableHash` generates a stable suffix per attendee,
   ensuring names are DNS-safe, globally unique, and consistent across re-runs. The hash is
   computed **once** and passed to Bicep as `resourceToken`; the template is the single source
   of truth for every resource name.
 - **Idempotent provisioning** — All resources are created once; re-runs skip existing resources.
+  Because `resourceToken` is derived from subscription id + RG name — both of which the
+  platform reuses when an event is torn down and re-deployed — the script first **purges
+  soft-deleted Foundry accounts and Key Vaults** whose names end in this lab's token. A
+  soft-deleted resource keeps its name reserved (for Foundry, also its global
+  `customSubDomainName`), so without this a re-deployed event fails during preflight with an
+  opaque `Microsoft.CognitiveServices/accounts ... reported preflight validation errors`
+  before any resource is touched. Only this lab's token is matched, so other labs sharing the
+  subscription are never affected.
 - **Managed identities** — No hardcoded keys or connection strings; all auth uses Entra ID +
   Azure RBAC (DefaultAzureCredential in notebooks).
 - **Multi-user RBAC** — Every ID in `$AllowedEntraUserIds` is granted the necessary data-plane

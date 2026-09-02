@@ -125,6 +125,54 @@ if ($AllowedEntraUserIds.Count -eq 0) {
 Write-Host "[INFO]  Deploying Citadel Agentic Governance Hub + Spoke into RG '$effectiveRG'..."
 Write-Host "[INFO]  Engine: $templateKind, resource-group-scoped."
 
+# ===== Purge soft-deleted namesakes left by a previous event =====
+# $resourceToken is derived from subscription id + RG name, and the platform reuses BOTH
+# when an event is torn down and a new one is deployed over it. Foundry accounts and Key
+# Vaults are soft deleted rather than removed, and a soft-deleted resource keeps its name
+# reserved — for Foundry, also its globally unique customSubDomainName. Re-deploying then
+# fails during preflight with an opaque 'Microsoft.CognitiveServices/accounts ... reported
+# preflight validation errors' before any resource is touched, which is what took out all
+# three labs on the Sept-10 re-run.
+#
+# Only names ending in THIS lab's token are purged, so other labs sharing the subscription
+# are never affected. A purge failure is non-fatal: it is reported, and the deployment
+# below surfaces the resulting preflight error.
+$softDeletedScopes = @(
+    @{ Label = 'Foundry account'; ApiVersion = '2023-05-01'
+       ListPath = "/subscriptions/$SubscriptionId/providers/Microsoft.CognitiveServices/deletedAccounts?api-version=2023-05-01" },
+    @{ Label = 'Key Vault'; ApiVersion = '2022-07-01'
+       ListPath = "/subscriptions/$SubscriptionId/providers/Microsoft.KeyVault/deletedVaults?api-version=2022-07-01" }
+)
+
+foreach ($scope in $softDeletedScopes) {
+    try {
+        $listResponse = Invoke-AzRestMethod -Method GET -Path $scope.ListPath -ErrorAction Stop
+        if ($listResponse.StatusCode -ne 200) {
+            Write-Host "[WARN]  Could not list soft-deleted $($scope.Label)s (HTTP $($listResponse.StatusCode)) — skipping purge check."
+            continue
+        }
+        # The deleted-resource id already encodes location and original RG, so purging by
+        # id avoids reconstructing a scope that may differ from the current deployment.
+        $stale = @(($listResponse.Content | ConvertFrom-Json).value |
+            Where-Object { $_.name -and $_.name.EndsWith($resourceToken) })
+
+        foreach ($item in $stale) {
+            Write-Host "[INFO]  Purging soft-deleted $($scope.Label) '$($item.name)' from a previous event..."
+            $purge = Invoke-AzRestMethod -Method DELETE -Path "$($item.id)?api-version=$($scope.ApiVersion)" -ErrorAction Stop
+            if (@(200, 202, 204) -contains $purge.StatusCode) {
+                Write-Host "[OK]    Purged '$($item.name)'."
+            }
+            else {
+                Write-Host "[WARN]  Failed to purge '$($item.name)' (HTTP $($purge.StatusCode)). Deployment will likely"
+                Write-Host "[WARN]  fail preflight because the name is still reserved. Response: $($purge.Content)"
+            }
+        }
+    }
+    catch {
+        Write-Host "[WARN]  Soft-deleted $($scope.Label) check skipped: $_"
+    }
+}
+
 $deployOutputs = $null
 $effectiveLocation = $null
 $firstFailure = $null
