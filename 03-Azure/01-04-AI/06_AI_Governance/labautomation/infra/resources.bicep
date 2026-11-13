@@ -1477,7 +1477,7 @@ resource hubFoundryAppInsightsConnection 'Microsoft.CognitiveServices/accounts/c
     authType: 'ApiKey'
     isSharedToAll: true
     credentials: {
-      key: reference(aiHub.id, '2020-02-02').InstrumentationKey
+      key: aiHub.properties.ConnectionString
     }
     metadata: {
       ApiType: 'Azure'
@@ -1496,7 +1496,7 @@ resource spokeFoundryAppInsightsConnection 'Microsoft.CognitiveServices/accounts
     authType: 'ApiKey'
     isSharedToAll: true
     credentials: {
-      key: reference(aiSpoke.id, '2020-02-02').InstrumentationKey
+      key: aiSpoke.properties.ConnectionString
     }
     metadata: {
       ApiType: 'Azure'
