@@ -1528,7 +1528,7 @@
         "authType": "ApiKey",
         "isSharedToAll": true,
         "credentials": {
-          "key": "[reference(resourceId('Microsoft.Insights/components', variables('aiName')), '2020-02-02').InstrumentationKey]"
+          "key": "[reference(resourceId('Microsoft.Insights/components', variables('aiName')), '2020-02-02').ConnectionString]"
         },
         "metadata": {
           "ApiType": "Azure",
@@ -1550,7 +1550,7 @@
         "authType": "ApiKey",
         "isSharedToAll": true,
         "credentials": {
-          "key": "[reference(resourceId('Microsoft.Insights/components', variables('spokeAiName')), '2020-02-02').InstrumentationKey]"
+          "key": "[reference(resourceId('Microsoft.Insights/components', variables('spokeAiName')), '2020-02-02').ConnectionString]"
         },
         "metadata": {
           "ApiType": "Azure",
